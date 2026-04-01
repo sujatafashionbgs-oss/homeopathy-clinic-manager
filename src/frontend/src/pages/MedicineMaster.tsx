@@ -27,10 +27,11 @@ import {
   Search,
   Upload,
 } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
+import { useMedicineMasterStore } from "../store/medicineMasterStore";
 
-interface HomeoMedicine {
+export interface HomeoMedicine {
   id: number;
   name: string;
   category: string;
@@ -40,7 +41,7 @@ interface HomeoMedicine {
   company: string;
 }
 
-const HOMEO_MEDICINES: HomeoMedicine[] = [
+export const HOMEO_MEDICINES: HomeoMedicine[] = [
   {
     id: 1,
     name: "Arnica Montana",
@@ -1411,7 +1412,11 @@ export default function MedicineMaster() {
   const [filterCategory, setFilterCategory] = useState("all");
   const [filterPotency, setFilterPotency] = useState("all");
   const [page, setPage] = useState(1);
-  const [medicines, setMedicines] = useState<HomeoMedicine[]>(HOMEO_MEDICINES);
+  const { medicines, addMedicines, initializeIfEmpty } =
+    useMedicineMasterStore();
+  useEffect(() => {
+    initializeIfEmpty(HOMEO_MEDICINES);
+  }, [initializeIfEmpty]);
   const [importOpen, setImportOpen] = useState(false);
   const [importRows, setImportRows] = useState<HomeoMedicine[]>([]);
   const [importFileName, setImportFileName] = useState("");
@@ -1521,7 +1526,7 @@ export default function MedicineMaster() {
       (m) => !existingNames.has(m.name.toLowerCase()),
     );
     const duplicates = importRows.length - newMeds.length;
-    setMedicines((prev) => [...prev, ...newMeds]);
+    addMedicines(newMeds);
     toast.success(
       `Imported ${newMeds.length} medicines${duplicates > 0 ? ` (${duplicates} duplicates skipped)` : ""}`,
     );
@@ -1704,7 +1709,7 @@ export default function MedicineMaster() {
                     style={{ backgroundColor: "oklch(0.42 0.12 152 / 0.08)" }}
                   >
                     <th className="text-left px-4 py-3 font-medium text-muted-foreground w-12">
-                      #
+                      S.No
                     </th>
                     <th className="text-left px-4 py-3 font-medium text-muted-foreground">
                       Medicine Name
@@ -1713,16 +1718,16 @@ export default function MedicineMaster() {
                       Category
                     </th>
                     <th className="text-left px-4 py-3 font-medium text-muted-foreground">
-                      उपयोग / मुख्य लक्षण
+                      Usage / Key Symptoms
                     </th>
                     <th className="text-left px-4 py-3 font-medium text-muted-foreground">
-                      Potency
+                      Available Potency
                     </th>
                     <th className="text-left px-4 py-3 font-medium text-muted-foreground">
-                      इकाई
+                      Unit / Form
                     </th>
                     <th className="text-left px-4 py-3 font-medium text-muted-foreground">
-                      कंपनी
+                      Company / Brand
                     </th>
                     <th className="text-right px-4 py-3 font-medium text-muted-foreground">
                       Action
