@@ -39,9 +39,11 @@ import {
   Edit,
   FileSpreadsheet,
   History,
+  MessageCircle,
   Plus,
   Printer,
   RefreshCw,
+  Search,
   Trash2,
   X,
 } from "lucide-react";
@@ -52,6 +54,7 @@ import {
   type PrescriptionItem,
   type Visit,
   useAddVisit,
+  useAllBills,
   useAllMedicines,
   useAllVisits,
   useClinicSettings,
@@ -104,6 +107,8 @@ export default function Visits() {
   const [deleteId, setDeleteId] = useState<bigint | null>(null);
   const [form, setForm] = useState(EMPTY_FORM);
   const [filterPatient, setFilterPatient] = useState("all");
+  const [filterPayment, setFilterPayment] = useState("all");
+  const [searchQuery, setSearchQuery] = useState("");
   const [page, setPage] = useState(1);
   const [revisitPatientId, setRevisitPatientId] = useState<bigint | null>(null);
   const [historyOpen, setHistoryOpen] = useState(true);
@@ -113,6 +118,7 @@ export default function Visits() {
   const { data: patients } = useSearchPatients("");
   const { data: medicines } = useAllMedicines();
   const { data: settings } = useClinicSettings();
+  const { data: allBills } = useAllBills();
   const addVisit = useAddVisit();
   const updateVisit = useUpdateVisit();
   const deleteVisit = useDeleteVisit();
@@ -123,12 +129,41 @@ export default function Visits() {
     return () => window.removeEventListener("shortcut:new-visit", handler);
   }, []);
 
-  const filtered = (visits ?? []).filter(
-    (v) => filterPatient === "all" || v.patientId.toString() === filterPatient,
-  );
+  const patientMap = new Map((patients ?? []).map((p) => [p.id.toString(), p]));
+
+  // Build payment status map keyed by patientId
+  const billPaymentByPatient = new Map<string, string>();
+  for (const bill of allBills ?? []) {
+    const key = bill.patientId.toString();
+    const existing = billPaymentByPatient.get(key);
+    // Priority: if any pending/partial, mark as such
+    if (!existing || existing === "paid") {
+      billPaymentByPatient.set(key, bill.paymentStatus);
+    }
+  }
+
+  const filtered = (visits ?? []).filter((v) => {
+    if (filterPatient !== "all" && v.patientId.toString() !== filterPatient)
+      return false;
+    const patient = patientMap.get(v.patientId.toString());
+    if (searchQuery) {
+      const q = searchQuery.toLowerCase();
+      const nameMatch = patient?.name.toLowerCase().includes(q);
+      const mobileMatch = patient?.phone.includes(searchQuery);
+      const codeMatch = patient?.patientCode.toLowerCase().includes(q);
+      if (!nameMatch && !mobileMatch && !codeMatch) return false;
+    }
+    if (filterPayment !== "all") {
+      const status =
+        billPaymentByPatient.get(v.patientId.toString()) ?? "pending";
+      if (filterPayment === "paid" && status !== "paid") return false;
+      if (filterPayment === "unpaid" && status !== "pending") return false;
+      if (filterPayment === "partial" && status !== "partial") return false;
+    }
+    return true;
+  });
   const paginated = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
   const totalPages = Math.ceil(filtered.length / PAGE_SIZE);
-  const patientMap = new Map((patients ?? []).map((p) => [p.id.toString(), p]));
 
   const filteredPatients = patientSearch
     ? (patients ?? []).filter(
@@ -163,7 +198,7 @@ export default function Visits() {
       diagnosis: v.diagnosis,
       prescription: v.prescription,
       medicinePrescribed: v.medicinePrescribed,
-      followUpDate: toDateInputValue(v.followUpDate),
+      followUpDate: v.followUpDate ? toDateInputValue(v.followUpDate) : "",
       notes: v.notes,
       prescriptionInstructions: v.prescriptionInstructions ?? "",
       prescriptionItems: v.prescriptionItems?.length
@@ -267,8 +302,12 @@ export default function Visits() {
     };
   }, [printVisit]);
 
-  const handlePdfDownload = (v: Visit) => {
-    const patient = patientMap.get(v.patientId.toString());
+  const buildPrescriptionHTML = (
+    v: Visit,
+    patient:
+      | { name?: string; patientCode?: string; age?: bigint; gender?: string }
+      | undefined,
+  ) => {
     const clinicName = settings?.clinicName || "Homeopathy Clinic";
     const doctorName = settings?.doctorName || "";
     const address = settings?.address || "";
@@ -279,7 +318,8 @@ export default function Visits() {
           `<tr style="border-bottom:1px solid #ddd"><td style="padding:4px">${rx.medicineName}</td><td style="padding:4px;text-align:center">${rx.potency}</td><td style="padding:4px;text-align:center">${rx.quantity} ${rx.unit}</td><td style="padding:4px;text-align:center">${rx.dosage}</td><td style="padding:4px;text-align:center">${rx.durationDays ?? ""}</td></tr>`,
       )
       .join("");
-    const html = `<!DOCTYPE html><html><head><title>Prescription - ${patient?.name ?? ""}</title><style>body{font-family:Arial,sans-serif;font-size:12pt;padding:20px;color:#000}table{width:100%;border-collapse:collapse}th{border-bottom:2px solid #333;padding:4px;text-align:left}hr{margin:8px 0}</style></head><body>
+    return `<!DOCTYPE html><html><head><title>Prescription - ${patient?.name ?? ""}</title>
+    <style>body{font-family:Arial,sans-serif;font-size:12pt;padding:20px;color:#000}table{width:100%;border-collapse:collapse}th{border-bottom:2px solid #333;padding:4px;text-align:left}hr{margin:8px 0}@page{size:A4 portrait;margin:10mm}</style></head><body>
       <div style="text-align:center;border-bottom:1px solid #333;padding-bottom:8px;margin-bottom:12px">
         <h2 style="margin:0">${clinicName}</h2>
         <p style="margin:2px 0">${doctorName}</p>
@@ -303,6 +343,11 @@ export default function Visits() {
       ${v.prescriptionInstructions ? `<div style="border:1px solid #333;padding:8px;margin-top:12px"><b>Instructions:</b> ${v.prescriptionInstructions}</div>` : ""}
       ${v.followUpDate ? `<p style="margin-top:8px"><b>Follow-up:</b> ${new Date(Number(v.followUpDate) / 1000000).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })}</p>` : ""}
     </body></html>`;
+  };
+
+  const handlePdfDownload = (v: Visit) => {
+    const patient = patientMap.get(v.patientId.toString());
+    const html = buildPrescriptionHTML(v, patient);
     const w = window.open("", "_blank");
     if (w) {
       w.document.write(html);
@@ -312,6 +357,141 @@ export default function Visits() {
         setTimeout(() => w.close(), 500);
       }, 300);
     }
+  };
+
+  const buildWhatsAppMessage = (v: Visit) => {
+    const patient = patientMap.get(v.patientId.toString());
+    const clinicName = settings?.clinicName || "Homeopathy Clinic";
+    const dateStr = new Date(Number(v.visitDate) / 1000000).toLocaleDateString(
+      "en-IN",
+      { day: "2-digit", month: "short", year: "numeric" },
+    );
+    let msg = `*${clinicName} - Prescription*\n`;
+    msg += `Patient: ${patient?.name ?? ""} (${patient?.patientCode ?? ""})\n`;
+    msg += `Date: ${dateStr}\n\n`;
+    msg += `*Chief Complaints:*\n${v.chiefComplaints}\n\n`;
+    if (v.diagnosis) msg += `*Diagnosis:* ${v.diagnosis}\n\n`;
+    if (v.prescriptionItems && v.prescriptionItems.length > 0) {
+      msg += "*\u211e Prescription:*\n";
+      v.prescriptionItems.forEach((rx, i) => {
+        msg += `${i + 1}. ${rx.medicineName} ${rx.potency} - ${rx.dosage} x ${rx.durationDays ?? ""} days\n`;
+      });
+    } else if (v.prescription) {
+      msg += `*\u211e Prescription:*\n${v.prescription}\n`;
+    }
+    if (v.prescriptionInstructions) {
+      msg += `\n*Instructions:* ${v.prescriptionInstructions}\n`;
+    }
+    if (v.followUpDate) {
+      const fuDate = new Date(
+        Number(v.followUpDate) / 1000000,
+      ).toLocaleDateString("en-IN", {
+        day: "2-digit",
+        month: "short",
+        year: "numeric",
+      });
+      msg += `\n*Follow-up:* ${fuDate}`;
+    }
+    return msg;
+  };
+
+  const handleWhatsApp = (v: Visit) => {
+    const patient = patientMap.get(v.patientId.toString());
+    const mobile = (patient?.phone ?? "").replace(/\D/g, "").slice(-10);
+    if (!mobile || mobile.length !== 10) {
+      toast.error("Patient mobile number not available or invalid");
+      return;
+    }
+    const message = buildWhatsAppMessage(v);
+    window.open(
+      `https://wa.me/91${mobile}?text=${encodeURIComponent(message)}`,
+      "_blank",
+    );
+  };
+
+  const handleWhatsAppFromModal = () => {
+    if (!form.patientId) {
+      toast.error("Please select a patient first");
+      return;
+    }
+    const patient = patientMap.get(form.patientId);
+    const mobile = (patient?.phone ?? "").replace(/\D/g, "").slice(-10);
+    if (!mobile || mobile.length !== 10) {
+      toast.error("Patient mobile number not available or invalid");
+      return;
+    }
+    const rxItems = form.prescriptionItems.filter((r) => r.medicineName.trim());
+    const clinicName = settings?.clinicName || "Homeopathy Clinic";
+    let msg = `*${clinicName} - Prescription*\n`;
+    msg += `Patient: ${patient?.name ?? ""} (${patient?.patientCode ?? ""})\n`;
+    msg += `Date: ${new Date().toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })}\n\n`;
+    if (form.chiefComplaints)
+      msg += `*Chief Complaints:*\n${form.chiefComplaints}\n\n`;
+    if (form.diagnosis) msg += `*Diagnosis:* ${form.diagnosis}\n\n`;
+    if (rxItems.length > 0) {
+      msg += "*\u211e Prescription:*\n";
+      rxItems.forEach((rx, i) => {
+        msg += `${i + 1}. ${rx.medicineName} ${rx.potency} - ${rx.dosage} x ${rx.durationDays ?? ""} days\n`;
+      });
+    } else if (form.prescription) {
+      msg += `*\u211e Prescription:*\n${form.prescription}\n`;
+    }
+    if (form.prescriptionInstructions) {
+      msg += `\n*Instructions:* ${form.prescriptionInstructions}`;
+    }
+    if (form.followUpDate) {
+      msg += `\n*Follow-up:* ${new Date(form.followUpDate).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })}`;
+    }
+    window.open(
+      `https://wa.me/91${mobile}?text=${encodeURIComponent(msg)}`,
+      "_blank",
+    );
+  };
+
+  const exportVisitCSV = (v: Visit) => {
+    const patient = patientMap.get(v.patientId.toString());
+    const dateStr = new Date(Number(v.visitDate) / 1000000).toLocaleDateString(
+      "en-IN",
+    );
+    const rxText = (v.prescriptionItems ?? [])
+      .map(
+        (rx) =>
+          `${rx.medicineName} ${rx.potency} ${rx.dosage} ${rx.durationDays}d`,
+      )
+      .join(" | ");
+    const rows: string[][] = [
+      ["Field", "Value"],
+      ["Patient", patient?.name ?? "Unknown"],
+      ["Patient Code", patient?.patientCode ?? ""],
+      ["Mobile", patient?.phone ?? ""],
+      ["Visit Date", dateStr],
+      ["Visit Type", v.visitType ?? "New"],
+      ["Chief Complaints", v.chiefComplaints],
+      ["Diagnosis", v.diagnosis ?? ""],
+      ["BP", v.bp ?? ""],
+      ["Weight", v.weight ?? ""],
+      ["Prescription", rxText || v.prescription],
+      ["Instructions", v.prescriptionInstructions ?? ""],
+      [
+        "Follow-up",
+        v.followUpDate
+          ? new Date(Number(v.followUpDate) / 1000000).toLocaleDateString(
+              "en-IN",
+            )
+          : "",
+      ],
+      ["Notes", v.notes ?? ""],
+    ];
+    const csv = rows
+      .map((r) => r.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(","))
+      .join("\n");
+    const blob = new Blob([csv], { type: "text/csv" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `visit-${patient?.name ?? "unknown"}-${dateStr}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
   };
 
   function downloadCSV(filename: string, rows: string[][]): void {
@@ -334,16 +514,23 @@ export default function Visits() {
       [
         "Date",
         "Patient",
+        "Mobile",
         "Visit Type",
         "Chief Complaints",
         "Diagnosis",
+        "Prescription",
         "BP",
         "Weight",
         "Follow-up",
+        "Payment Status",
       ],
     ];
     for (const v of filtered) {
       const p = patientMap.get(v.patientId.toString());
+      const rxText = (v.prescriptionItems ?? [])
+        .map((rx) => `${rx.medicineName} ${rx.potency} ${rx.dosage}`)
+        .join(" | ");
+      const payStatus = billPaymentByPatient.get(v.patientId.toString()) ?? "";
       rows.push([
         new Date(Number(v.visitDate) / 1000000).toLocaleDateString("en-IN", {
           day: "2-digit",
@@ -351,9 +538,11 @@ export default function Visits() {
           year: "numeric",
         }),
         p?.name ?? "Unknown",
+        p?.phone ?? "",
         v.visitType ?? "New",
         v.chiefComplaints ?? "",
         v.diagnosis ?? "",
+        rxText || v.prescription || "",
         v.bp ?? "",
         v.weight ?? "",
         v.followUpDate
@@ -362,6 +551,7 @@ export default function Visits() {
               { day: "2-digit", month: "short", year: "numeric" },
             )
           : "",
+        payStatus,
       ]);
     }
     downloadCSV("visits.csv", rows);
@@ -438,7 +628,7 @@ export default function Visits() {
                       )}
                       {printVisit.temperature && (
                         <p>
-                          <strong>Temp:</strong> {printVisit.temperature}°F
+                          <strong>Temp:</strong> {printVisit.temperature}\u00b0F
                         </p>
                       )}
                     </div>
@@ -531,7 +721,7 @@ export default function Visits() {
             className="gap-2"
             data-ocid="visits.export_button"
           >
-            <FileSpreadsheet className="w-4 h-4" /> Export CSV
+            <FileSpreadsheet className="w-4 h-4" /> Export Excel
           </Button>
           <Button
             onClick={openAdd}
@@ -543,27 +733,61 @@ export default function Visits() {
         </div>
       </div>
 
-      {/* Filter */}
-      <div className="max-w-xs">
-        <Select
-          value={filterPatient}
-          onValueChange={(v) => {
-            setFilterPatient(v);
-            setPage(1);
-          }}
-        >
-          <SelectTrigger data-ocid="visits.patient_filter.select">
-            <SelectValue placeholder="All Patients" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Patients</SelectItem>
-            {(patients ?? []).map((p) => (
-              <SelectItem key={p.id.toString()} value={p.id.toString()}>
-                {p.name} ({p.patientCode})
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+      {/* Search + Filters */}
+      <div className="flex flex-wrap gap-3 items-center">
+        <div className="relative">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+          <Input
+            value={searchQuery}
+            onChange={(e) => {
+              setSearchQuery(e.target.value);
+              setPage(1);
+            }}
+            placeholder="Search by name or mobile..."
+            className="pl-9 w-64"
+            data-ocid="visits.search_input"
+          />
+        </div>
+        <div className="w-52">
+          <Select
+            value={filterPatient}
+            onValueChange={(v) => {
+              setFilterPatient(v);
+              setPage(1);
+            }}
+          >
+            <SelectTrigger data-ocid="visits.patient_filter.select">
+              <SelectValue placeholder="All Patients" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Patients</SelectItem>
+              {(patients ?? []).map((p) => (
+                <SelectItem key={p.id.toString()} value={p.id.toString()}>
+                  {p.name} ({p.patientCode})
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="flex gap-1">
+          {(["all", "paid", "unpaid", "partial"] as const).map((s) => (
+            <Button
+              key={s}
+              size="sm"
+              variant={filterPayment === s ? "default" : "outline"}
+              onClick={() => {
+                setFilterPayment(s);
+                setPage(1);
+              }}
+              className={
+                filterPayment === s ? "bg-primary text-primary-foreground" : ""
+              }
+              data-ocid={`visits.payment_filter.${s}.tab`}
+            >
+              {s.charAt(0).toUpperCase() + s.slice(1)}
+            </Button>
+          ))}
+        </div>
       </div>
 
       <Card className="shadow-card">
@@ -593,6 +817,9 @@ export default function Visits() {
                   <th className="text-left px-4 py-3 font-medium text-muted-foreground">
                     Follow-up
                   </th>
+                  <th className="text-left px-4 py-3 font-medium text-muted-foreground">
+                    Payment
+                  </th>
                   <th className="text-right px-4 py-3 font-medium text-muted-foreground">
                     Actions
                   </th>
@@ -602,7 +829,7 @@ export default function Visits() {
                 {paginated.length === 0 ? (
                   <tr>
                     <td
-                      colSpan={8}
+                      colSpan={9}
                       className="text-center py-12 text-muted-foreground"
                       data-ocid="visits.empty_state"
                     >
@@ -615,6 +842,9 @@ export default function Visits() {
                     const isOverdue =
                       v.followUpDate !== null &&
                       Number(v.followUpDate) / 1_000_000 < Date.now();
+                    const payStatus = billPaymentByPatient.get(
+                      v.patientId.toString(),
+                    );
                     return (
                       <tr
                         key={v.id.toString()}
@@ -636,17 +866,33 @@ export default function Visits() {
                           <p className="text-xs text-muted-foreground">
                             {patient?.patientCode}
                           </p>
+                          <p className="text-xs text-muted-foreground">
+                            {patient?.phone}
+                          </p>
                         </td>
                         <td className="px-4 py-3">
                           {visitTypeBadge(v.visitType)}
                         </td>
-                        <td className="px-4 py-3 max-w-[180px]">
+                        <td className="px-4 py-3 max-w-[160px]">
                           <p className="truncate text-xs text-muted-foreground">
-                            {v.chiefComplaints || "—"}
+                            {v.chiefComplaints || "\u2014"}
                           </p>
+                          {v.prescriptionItems &&
+                            v.prescriptionItems.length > 0 && (
+                              <p className="text-xs text-primary mt-0.5 truncate">
+                                \u211e{" "}
+                                {v.prescriptionItems
+                                  .map((r) => r.medicineName)
+                                  .join(", ")}
+                              </p>
+                            )}
                         </td>
-                        <td className="px-4 py-3 text-xs">{v.bp || "—"}</td>
-                        <td className="px-4 py-3 text-xs">{v.weight || "—"}</td>
+                        <td className="px-4 py-3 text-xs">
+                          {v.bp || "\u2014"}
+                        </td>
+                        <td className="px-4 py-3 text-xs">
+                          {v.weight || "\u2014"}
+                        </td>
                         <td className="px-4 py-3">
                           {v.followUpDate ? (
                             <Badge
@@ -659,7 +905,29 @@ export default function Visits() {
                               {formatDate(v.followUpDate)}
                             </Badge>
                           ) : (
-                            <span className="text-muted-foreground">—</span>
+                            <span className="text-muted-foreground">
+                              \u2014
+                            </span>
+                          )}
+                        </td>
+                        <td className="px-4 py-3">
+                          {payStatus ? (
+                            <Badge
+                              className={
+                                payStatus === "paid"
+                                  ? "bg-green-100 text-green-800"
+                                  : payStatus === "partial"
+                                    ? "bg-amber-100 text-amber-800"
+                                    : "bg-red-100 text-red-800"
+                              }
+                            >
+                              {payStatus.charAt(0).toUpperCase() +
+                                payStatus.slice(1)}
+                            </Badge>
+                          ) : (
+                            <span className="text-muted-foreground text-xs">
+                              \u2014
+                            </span>
                           )}
                         </td>
                         <td className="px-4 py-3">
@@ -683,6 +951,26 @@ export default function Visits() {
                               data-ocid={`visits.pdf_button.${i + 1}`}
                             >
                               <Download className="w-4 h-4" />
+                            </Button>
+                            <Button
+                              size="icon"
+                              variant="ghost"
+                              className="h-8 w-8 text-emerald-600"
+                              onClick={() => handleWhatsApp(v)}
+                              title="Send via WhatsApp"
+                              data-ocid={`visits.whatsapp_button.${i + 1}`}
+                            >
+                              <MessageCircle className="w-4 h-4" />
+                            </Button>
+                            <Button
+                              size="icon"
+                              variant="ghost"
+                              className="h-8 w-8 text-blue-600"
+                              onClick={() => exportVisitCSV(v)}
+                              title="Export to Excel"
+                              data-ocid={`visits.excel_button.${i + 1}`}
+                            >
+                              <FileSpreadsheet className="w-4 h-4" />
                             </Button>
                             <Button
                               size="icon"
@@ -833,15 +1121,30 @@ export default function Visits() {
                           )}
                           {pv.prescriptionItems &&
                             pv.prescriptionItems.length > 0 && (
-                              <p className="text-xs">
-                                <span className="font-medium">Medicines:</span>{" "}
-                                {pv.prescriptionItems
-                                  .map(
-                                    (rx) => `${rx.medicineName} ${rx.potency}`,
-                                  )
-                                  .join(", ")}
-                              </p>
+                              <div className="mt-1">
+                                <p className="text-xs font-medium">
+                                  Medicines prescribed:
+                                </p>
+                                <div className="flex flex-wrap gap-1 mt-0.5">
+                                  {pv.prescriptionItems.map((rx, rxIdx) => (
+                                    <Badge
+                                      key={`${rx.medicineName}-${rxIdx}`}
+                                      variant="outline"
+                                      className="text-xs"
+                                    >
+                                      {rx.medicineName} {rx.potency} \u2014{" "}
+                                      {rx.dosage}
+                                    </Badge>
+                                  ))}
+                                </div>
+                              </div>
                             )}
+                          {!pv.prescriptionItems?.length && pv.prescription && (
+                            <p className="text-xs mt-1">
+                              <span className="font-medium">\u211e</span>{" "}
+                              {pv.prescription}
+                            </p>
+                          )}
                         </div>
                       ))}
                     </div>
@@ -858,7 +1161,7 @@ export default function Visits() {
                 value="prescription"
                 data-ocid="visits.tab.prescription"
               >
-                Prescription (℞)
+                Prescription (\u211e)
               </TabsTrigger>
             </TabsList>
 
@@ -879,7 +1182,7 @@ export default function Visits() {
                       <Input
                         value={patientSearch}
                         onChange={(e) => setPatientSearch(e.target.value)}
-                        placeholder="Type patient name or code..."
+                        placeholder="Type patient name, mobile or code..."
                         data-ocid="visits.patient_search.input"
                       />
                       {patientSearch && filteredPatients.length > 0 && (
@@ -903,13 +1206,19 @@ export default function Visits() {
                               <span className="text-muted-foreground">
                                 ({p.patientCode})
                               </span>
+                              {p.phone && (
+                                <span className="text-muted-foreground ml-2 text-xs">
+                                  {p.phone}
+                                </span>
+                              )}
                             </button>
                           ))}
                         </div>
                       )}
                       {form.patientId && (
                         <p className="text-xs text-green-600">
-                          ✓ Selected: {patientMap.get(form.patientId)?.name}
+                          \u2713 Selected:{" "}
+                          {patientMap.get(form.patientId)?.name}
                         </p>
                       )}
                     </>
@@ -1003,7 +1312,7 @@ export default function Visits() {
                   />
                 </div>
                 <div className="space-y-1.5">
-                  <Label>Temperature (°F)</Label>
+                  <Label>Temperature (\u00b0F)</Label>
                   <Input
                     value={form.temperature}
                     onChange={(e) =>
@@ -1255,6 +1564,30 @@ export default function Visits() {
                     data-ocid="visits.prescription.textarea"
                   />
                 </div>
+
+                {/* WhatsApp send from modal */}
+                {form.patientId && (
+                  <div className="border rounded-lg p-3 bg-emerald-50/50 flex items-center justify-between">
+                    <div>
+                      <p className="text-sm font-medium text-emerald-800">
+                        Send Prescription via WhatsApp
+                      </p>
+                      <p className="text-xs text-emerald-600">
+                        Send to {patientMap.get(form.patientId)?.name} (
+                        {patientMap.get(form.patientId)?.phone})
+                      </p>
+                    </div>
+                    <Button
+                      type="button"
+                      size="sm"
+                      className="bg-emerald-600 hover:bg-emerald-700 text-white gap-2"
+                      onClick={handleWhatsAppFromModal}
+                      data-ocid="visits.whatsapp_modal.button"
+                    >
+                      <MessageCircle className="w-4 h-4" /> Send WhatsApp
+                    </Button>
+                  </div>
+                )}
               </div>
             </TabsContent>
           </Tabs>

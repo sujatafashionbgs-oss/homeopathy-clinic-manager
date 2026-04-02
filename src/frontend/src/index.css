@@ -90,7 +90,8 @@
 }
 
 @page {
-  margin: 15mm;
+  size: A4 portrait;
+  margin: 10mm;
 }
 
 @media print {
@@ -113,6 +114,12 @@
   }
   .print-only {
     display: block !important;
+  }
+  nav,
+  aside,
+  header,
+  .sidebar {
+    display: none !important;
   }
   body {
     background: white !important;

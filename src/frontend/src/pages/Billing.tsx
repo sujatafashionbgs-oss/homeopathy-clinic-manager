@@ -33,6 +33,7 @@ import {
   CheckCircle,
   Download,
   FileSpreadsheet,
+  MessageCircle,
   Plus,
   Printer,
   Trash2,
@@ -47,12 +48,20 @@ import {
   PaymentStatus,
   useAddBill,
   useAddBillPayment,
+  useAddStockMovement,
   useAllBills,
+  useAllMedicines,
   useClinicSettings,
   useDeleteBill,
   useSearchPatients,
 } from "../hooks/useQueries";
-import { formatDate, formatRupees, nowNanoseconds } from "../utils/formatters";
+import { useMockStore } from "../store/mockData";
+import {
+  formatDate,
+  formatRupees,
+  nowNanoseconds,
+  toNanoseconds,
+} from "../utils/formatters";
 
 const PAGE_SIZE = 10;
 const GST_RATES = [0, 5, 12, 18];
@@ -105,6 +114,9 @@ export default function Billing() {
   // updateBill not needed - using addBillPayment
   const deleteBill = useDeleteBill();
   const addBillPayment = useAddBillPayment();
+  const addStockMovement = useAddStockMovement();
+  const { data: medicines } = useAllMedicines();
+  const adjustStock = useMockStore((s) => s.adjustStock);
 
   useEffect(() => {
     const handler = () => {
@@ -185,6 +197,7 @@ export default function Billing() {
         : 0;
       const status: "paid" | "partial" | "pending" =
         paid >= totalAmount ? "paid" : paid > 0 ? "partial" : "pending";
+      const preNum = useMockStore.getState().nextBillNumber;
       const billId = await addBill.mutateAsync({
         patientId: BigInt(patientId),
         billDate: nowNanoseconds(),
@@ -199,7 +212,7 @@ export default function Billing() {
       });
       // Add initial payment record if paid
       if (paid > 0) {
-        addBillPayment.mutateAsync({
+        await addBillPayment.mutateAsync({
           billId,
           payment: {
             date: nowNanoseconds(),
@@ -207,6 +220,41 @@ export default function Billing() {
             mode: initialPayMode,
           },
         });
+      }
+      // Auto-deduct stock for medicine items
+      const allMeds = medicines ?? [];
+      let stockCount = 0;
+      for (const item of finalItems) {
+        const med = allMeds.find(
+          (m) =>
+            m.name.toLowerCase() === item.name.toLowerCase() ||
+            `${m.name} ${m.potency}`.toLowerCase() ===
+              item.name.toLowerCase() ||
+            item.name.toLowerCase().startsWith(m.name.toLowerCase()),
+        );
+        if (med) {
+          const newBal = Math.max(0, Number(med.quantity) - item.quantity);
+          if (Number(med.quantity) - item.quantity < 0) {
+            toast.warning(`⚠ Stock going negative for ${med.name}`);
+          }
+          adjustStock(med.id, -item.quantity);
+          addStockMovement.mutateAsync({
+            medicineId: med.id,
+            date: nowNanoseconds(),
+            type: "Remove",
+            movementType: "Dispensed to Patient",
+            qtyIn: 0,
+            qtyOut: item.quantity,
+            balance: newBal,
+            reference: `INV-${new Date().getFullYear()}-${String(preNum).padStart(5, "0")}`,
+            notes: "Dispensed to Patient",
+            by: "Admin",
+          });
+          stockCount++;
+        }
+      }
+      if (stockCount > 0) {
+        toast.success(`Stock updated for ${stockCount} medicine(s)`);
       }
       toast.success("Bill created");
       setModalOpen(false);
@@ -227,7 +275,7 @@ export default function Billing() {
       await addBillPayment.mutateAsync({
         billId: selectedBill.id,
         payment: {
-          date: nowNanoseconds(),
+          date: payDate ? toNanoseconds(payDate) : nowNanoseconds(),
           amount: paid,
           mode: payMode,
           reference: payRef || undefined,
@@ -301,6 +349,32 @@ export default function Billing() {
         setTimeout(() => w.close(), 500);
       }, 300);
     }
+  };
+
+  const handleBillWhatsApp = (b: Bill) => {
+    const p = patientMap.get(b.patientId.toString());
+    const mobile = (p?.phone ?? "").replace(/\D/g, "").slice(-10);
+    if (!mobile || mobile.length !== 10) {
+      toast.error("Patient mobile number not available");
+      return;
+    }
+    const clinicName = settings?.clinicName || "Homeopathy Clinic";
+    const dateStr = new Date(Number(b.billDate) / 1000000).toLocaleDateString(
+      "en-IN",
+      { day: "2-digit", month: "short", year: "numeric" },
+    );
+    let msg = `*${clinicName} — Invoice ${b.billNumber}*\n`;
+    msg += `Patient: ${p?.name ?? ""}\n`;
+    msg += `Date: ${dateStr}\n`;
+    msg += `Total: \u20b9${b.totalAmount.toFixed(2)}\n`;
+    msg += `Paid: \u20b9${b.paidAmount.toFixed(2)}\n`;
+    const balance = b.totalAmount - b.paidAmount;
+    if (balance > 0) msg += `Balance Due: \u20b9${balance.toFixed(2)}\n`;
+    msg += `Status: ${b.paymentStatus.toUpperCase()}`;
+    window.open(
+      `https://wa.me/91${mobile}?text=${encodeURIComponent(msg)}`,
+      "_blank",
+    );
   };
 
   function downloadCSV(filename: string, rows: string[][]): void {
@@ -647,6 +721,16 @@ export default function Billing() {
                               data-ocid={`billing.pdf_button.${i + 1}`}
                             >
                               <Download className="w-4 h-4" />
+                            </Button>
+                            <Button
+                              size="icon"
+                              variant="ghost"
+                              className="h-8 w-8 text-emerald-600"
+                              onClick={() => handleBillWhatsApp(b)}
+                              title="Send via WhatsApp"
+                              data-ocid={`billing.whatsapp_button.${i + 1}`}
+                            >
+                              <MessageCircle className="w-4 h-4" />
                             </Button>
                             <Button
                               size="icon"

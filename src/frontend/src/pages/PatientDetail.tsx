@@ -12,6 +12,11 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/components/ui/collapsible";
+import {
   Dialog,
   DialogContent,
   DialogFooter,
@@ -26,8 +31,10 @@ import { useNavigate, useParams } from "@tanstack/react-router";
 import {
   ArrowLeft,
   Calendar,
+  ChevronDown,
   Clock,
   Edit,
+  History,
   Printer,
   RefreshCw,
   Trash2,
@@ -85,11 +92,17 @@ export default function PatientDetail() {
   const [deleteVisitId, setDeleteVisitId] = useState<bigint | null>(null);
   const [printVisit, setPrintVisit] = useState<Visit | null>(null);
   const [vForm, setVForm] = useState(EMPTY_VISIT);
+  const [historyOpen, setHistoryOpen] = useState(true);
   const printRef = useRef<HTMLDivElement>(null);
+
+  const sortedVisits = [...(visits ?? [])].sort(
+    (a, b) => Number(b.visitDate) - Number(a.visitDate),
+  );
 
   const openRevisit = (_v: Visit) => {
     setEditVisit(null);
     setIsRevisit(true);
+    setHistoryOpen(true);
     setVForm({
       visitDate: new Date().toISOString().split("T")[0],
       visitType: "Follow-up",
@@ -113,6 +126,7 @@ export default function PatientDetail() {
 
   const openEditVisit = (v: Visit) => {
     setEditVisit(v);
+    setIsRevisit(false);
     setVForm({
       visitType: v.visitType ?? "New",
       chiefComplaints: v.chiefComplaints,
@@ -169,7 +183,12 @@ export default function PatientDetail() {
 
   const handlePrint = (v: Visit) => {
     setPrintVisit(v);
-    setTimeout(() => window.print(), 200);
+    setTimeout(() => {
+      window.print();
+      window.addEventListener("afterprint", () => setPrintVisit(null), {
+        once: true,
+      });
+    }, 200);
   };
 
   if (patientLoading) {
@@ -232,10 +251,73 @@ export default function PatientDetail() {
             </div>
             <div className="border-t pt-4">
               <p className="text-lg font-bold mb-2">&#8478; Prescription</p>
-              <pre className="whitespace-pre-wrap text-sm">
-                {printVisit.prescription}
-              </pre>
+              {printVisit.prescriptionItems &&
+              printVisit.prescriptionItems.length > 0 ? (
+                <table
+                  style={{
+                    width: "100%",
+                    borderCollapse: "collapse",
+                    fontSize: "11pt",
+                  }}
+                >
+                  <thead>
+                    <tr style={{ borderBottom: "2px solid #333" }}>
+                      <th style={{ textAlign: "left", padding: "4px" }}>
+                        Medicine
+                      </th>
+                      <th style={{ textAlign: "center", padding: "4px" }}>
+                        Potency
+                      </th>
+                      <th style={{ textAlign: "center", padding: "4px" }}>
+                        Qty/Unit
+                      </th>
+                      <th style={{ textAlign: "center", padding: "4px" }}>
+                        Dosage
+                      </th>
+                      <th style={{ textAlign: "center", padding: "4px" }}>
+                        Days
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {printVisit.prescriptionItems.map((rx, idx) => (
+                      // biome-ignore lint/suspicious/noArrayIndexKey: stable for print
+                      <tr key={idx} style={{ borderBottom: "1px solid #ddd" }}>
+                        <td style={{ padding: "4px" }}>{rx.medicineName}</td>
+                        <td style={{ padding: "4px", textAlign: "center" }}>
+                          {rx.potency}
+                        </td>
+                        <td style={{ padding: "4px", textAlign: "center" }}>
+                          {rx.quantity} {rx.unit}
+                        </td>
+                        <td style={{ padding: "4px", textAlign: "center" }}>
+                          {rx.dosage}
+                        </td>
+                        <td style={{ padding: "4px", textAlign: "center" }}>
+                          {rx.durationDays}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              ) : (
+                <pre className="whitespace-pre-wrap text-sm">
+                  {printVisit.prescription}
+                </pre>
+              )}
             </div>
+            {printVisit.prescriptionInstructions && (
+              <div
+                style={{
+                  border: "1px dashed #333",
+                  padding: "8px",
+                  marginTop: "12px",
+                }}
+              >
+                <strong>Instructions:</strong>{" "}
+                {printVisit.prescriptionInstructions}
+              </div>
+            )}
             {printVisit.followUpDate && (
               <p className="mt-4">
                 <strong>Follow-up:</strong>{" "}
@@ -264,12 +346,19 @@ export default function PatientDetail() {
         <div>
           <h1 className="text-2xl font-heading font-bold">{patient.name}</h1>
           <p className="text-muted-foreground text-sm">
-            {patient.patientCode} · {Number(patient.age)} yrs · {patient.gender}
+            {patient.patientCode} \u00b7 {Number(patient.age)} yrs \u00b7{" "}
+            {patient.gender} \u00b7 {patient.phone}
           </p>
         </div>
-        <Badge className="ml-2 bg-green-100 text-green-800 border-green-200">
-          Active
-        </Badge>
+        {patient.isActive ? (
+          <Badge className="ml-2 bg-green-100 text-green-800 border-green-200">
+            Active
+          </Badge>
+        ) : (
+          <Badge className="ml-2 bg-red-100 text-red-800 border-red-200">
+            Inactive
+          </Badge>
+        )}
       </div>
 
       {/* Patient Info */}
@@ -291,7 +380,7 @@ export default function PatientDetail() {
             <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
               Chief Complaints
             </p>
-            <p className="text-sm">{patient.chiefComplaints || "—"}</p>
+            <p className="text-sm">{patient.chiefComplaints || "\u2014"}</p>
           </CardContent>
         </Card>
         <Card className="shadow-card">
@@ -299,7 +388,7 @@ export default function PatientDetail() {
             <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
               Medical History
             </p>
-            <p className="text-sm">{patient.medicalHistory || "—"}</p>
+            <p className="text-sm">{patient.medicalHistory || "\u2014"}</p>
           </CardContent>
         </Card>
       </div>
@@ -337,7 +426,7 @@ export default function PatientDetail() {
             </div>
           ) : (
             <div className="space-y-3">
-              {[...(visits ?? [])].reverse().map((v, i) => (
+              {sortedVisits.map((v, i) => (
                 <Card
                   key={v.id.toString()}
                   className="shadow-card"
@@ -350,10 +439,28 @@ export default function PatientDetail() {
                           <p className="font-medium text-sm">
                             {formatDate(v.visitDate)}
                           </p>
+                          {v.visitType && (
+                            <Badge
+                              className={
+                                v.visitType === "New"
+                                  ? "bg-blue-100 text-blue-800 text-xs"
+                                  : v.visitType === "Emergency"
+                                    ? "bg-red-100 text-red-800 text-xs"
+                                    : "bg-green-100 text-green-800 text-xs"
+                              }
+                            >
+                              {v.visitType}
+                            </Badge>
+                          )}
                           {v.followUpDate && (
                             <Badge variant="outline" className="text-xs gap-1">
                               <Calendar className="w-3 h-3" /> Follow-up:{" "}
                               {formatDate(v.followUpDate)}
+                            </Badge>
+                          )}
+                          {i === 0 && (
+                            <Badge className="bg-primary/10 text-primary text-xs">
+                              Latest
                             </Badge>
                           )}
                         </div>
@@ -367,7 +474,27 @@ export default function PatientDetail() {
                             {v.diagnosis}
                           </p>
                         )}
-                        {v.prescription && (
+                        {v.prescriptionItems &&
+                          v.prescriptionItems.length > 0 && (
+                            <div className="mt-1 p-2 bg-primary/5 rounded-lg">
+                              <p className="text-xs font-medium text-primary mb-1">
+                                \u211e Medicines:
+                              </p>
+                              <div className="flex flex-wrap gap-1">
+                                {v.prescriptionItems.map((rx, rxIdx) => (
+                                  <Badge
+                                    key={`${rx.medicineName}-${rxIdx}`}
+                                    variant="outline"
+                                    className="text-xs"
+                                  >
+                                    {rx.medicineName} {rx.potency} \u2014{" "}
+                                    {rx.dosage}
+                                  </Badge>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                        {!v.prescriptionItems?.length && v.prescription && (
                           <div className="mt-2 p-3 bg-muted/50 rounded-lg">
                             <p className="text-xs font-medium text-muted-foreground mb-1">
                               &#8478; Prescription
@@ -441,108 +568,106 @@ export default function PatientDetail() {
               </div>
             ) : (
               <div className="space-y-0 relative before:absolute before:left-5 before:top-0 before:bottom-0 before:w-0.5 before:bg-border">
-                {[...(visits ?? [])]
-                  .sort((a, b) => Number(b.visitDate) - Number(a.visitDate))
-                  .map((v, i) => (
-                    <div
-                      key={v.id.toString()}
-                      className="relative flex gap-4 pb-6"
-                      data-ocid={`patient_detail.timeline.item.${i + 1}`}
-                    >
-                      <div className="relative z-10 flex-shrink-0">
-                        <div
-                          className={`w-10 h-10 rounded-full flex items-center justify-center border-2 ${
-                            v.visitType === "New"
-                              ? "bg-blue-100 border-blue-400"
-                              : v.visitType === "Emergency"
-                                ? "bg-red-100 border-red-400"
-                                : "bg-green-100 border-green-400"
-                          }`}
-                        >
-                          <Clock className="w-4 h-4 text-muted-foreground" />
-                        </div>
-                      </div>
-                      <div className="flex-1 min-w-0 pt-1">
-                        <div className="flex items-center gap-2 flex-wrap mb-1">
-                          <span className="font-semibold text-sm">
-                            {formatDate(v.visitDate)}
-                          </span>
-                          {v.visitTime && (
-                            <span className="text-xs text-muted-foreground">
-                              {v.visitTime}
-                            </span>
-                          )}
-                          {v.visitType && (
-                            <Badge
-                              className={
-                                v.visitType === "New"
-                                  ? "bg-blue-100 text-blue-800 text-xs"
-                                  : v.visitType === "Emergency"
-                                    ? "bg-red-100 text-red-800 text-xs"
-                                    : "bg-green-100 text-green-800 text-xs"
-                              }
-                            >
-                              {v.visitType}
-                            </Badge>
-                          )}
-                          {i === 0 && (
-                            <Badge className="bg-primary/10 text-primary text-xs">
-                              Latest
-                            </Badge>
-                          )}
-                        </div>
-                        <Card className="shadow-sm">
-                          <CardContent className="p-3 space-y-1.5">
-                            <p className="text-sm">
-                              <span className="font-medium text-muted-foreground">
-                                Complaints:
-                              </span>{" "}
-                              {v.chiefComplaints}
-                            </p>
-                            {v.diagnosis && (
-                              <p className="text-sm">
-                                <span className="font-medium text-muted-foreground">
-                                  Diagnosis:
-                                </span>{" "}
-                                {v.diagnosis}
-                              </p>
-                            )}
-                            {v.bp && (
-                              <p className="text-xs text-muted-foreground">
-                                BP: {v.bp} | Weight: {v.weight || "—"}
-                              </p>
-                            )}
-                            {v.prescriptionItems &&
-                              v.prescriptionItems.length > 0 && (
-                                <div className="mt-1 pt-1 border-t">
-                                  <p className="text-xs font-medium text-muted-foreground mb-1">
-                                    ℞ Medicines:
-                                  </p>
-                                  <div className="flex flex-wrap gap-1">
-                                    {v.prescriptionItems.map((rx, idx) => (
-                                      <Badge
-                                        key={`${rx.medicineName}-${idx}`}
-                                        variant="outline"
-                                        className="text-xs"
-                                      >
-                                        {rx.medicineName} {rx.potency} —{" "}
-                                        {rx.dosage}
-                                      </Badge>
-                                    ))}
-                                  </div>
-                                </div>
-                              )}
-                            {v.followUpDate && (
-                              <p className="text-xs text-muted-foreground flex items-center gap-1">
-                                <Calendar className="w-3 h-3" /> Next:{" "}
-                                {formatDate(v.followUpDate)}
-                              </p>
-                            )}
-                          </CardContent>
-                        </Card>
+                {sortedVisits.map((v, i) => (
+                  <div
+                    key={v.id.toString()}
+                    className="relative flex gap-4 pb-6"
+                    data-ocid={`patient_detail.timeline.item.${i + 1}`}
+                  >
+                    <div className="relative z-10 flex-shrink-0">
+                      <div
+                        className={`w-10 h-10 rounded-full flex items-center justify-center border-2 ${
+                          v.visitType === "New"
+                            ? "bg-blue-100 border-blue-400"
+                            : v.visitType === "Emergency"
+                              ? "bg-red-100 border-red-400"
+                              : "bg-green-100 border-green-400"
+                        }`}
+                      >
+                        <Clock className="w-4 h-4 text-muted-foreground" />
                       </div>
                     </div>
-                  ))}
+                    <div className="flex-1 min-w-0 pt-1">
+                      <div className="flex items-center gap-2 flex-wrap mb-1">
+                        <span className="font-semibold text-sm">
+                          {formatDate(v.visitDate)}
+                        </span>
+                        {v.visitTime && (
+                          <span className="text-xs text-muted-foreground">
+                            {v.visitTime}
+                          </span>
+                        )}
+                        {v.visitType && (
+                          <Badge
+                            className={
+                              v.visitType === "New"
+                                ? "bg-blue-100 text-blue-800 text-xs"
+                                : v.visitType === "Emergency"
+                                  ? "bg-red-100 text-red-800 text-xs"
+                                  : "bg-green-100 text-green-800 text-xs"
+                            }
+                          >
+                            {v.visitType}
+                          </Badge>
+                        )}
+                        {i === 0 && (
+                          <Badge className="bg-primary/10 text-primary text-xs">
+                            Latest
+                          </Badge>
+                        )}
+                      </div>
+                      <Card className="shadow-sm">
+                        <CardContent className="p-3 space-y-1.5">
+                          <p className="text-sm">
+                            <span className="font-medium text-muted-foreground">
+                              Complaints:
+                            </span>{" "}
+                            {v.chiefComplaints}
+                          </p>
+                          {v.diagnosis && (
+                            <p className="text-sm">
+                              <span className="font-medium text-muted-foreground">
+                                Diagnosis:
+                              </span>{" "}
+                              {v.diagnosis}
+                            </p>
+                          )}
+                          {v.bp && (
+                            <p className="text-xs text-muted-foreground">
+                              BP: {v.bp} | Weight: {v.weight || "\u2014"}
+                            </p>
+                          )}
+                          {v.prescriptionItems &&
+                            v.prescriptionItems.length > 0 && (
+                              <div className="mt-1 pt-1 border-t">
+                                <p className="text-xs font-medium text-muted-foreground mb-1">
+                                  \u211e Medicines:
+                                </p>
+                                <div className="flex flex-wrap gap-1">
+                                  {v.prescriptionItems.map((rx, idx) => (
+                                    <Badge
+                                      key={`${rx.medicineName}-${idx}`}
+                                      variant="outline"
+                                      className="text-xs"
+                                    >
+                                      {rx.medicineName} {rx.potency} \u2014{" "}
+                                      {rx.dosage}
+                                    </Badge>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
+                          {v.followUpDate && (
+                            <p className="text-xs text-muted-foreground flex items-center gap-1">
+                              <Calendar className="w-3 h-3" /> Next:{" "}
+                              {formatDate(v.followUpDate)}
+                            </p>
+                          )}
+                        </CardContent>
+                      </Card>
+                    </div>
+                  </div>
+                ))}
               </div>
             )}
           </div>
@@ -611,10 +736,99 @@ export default function PatientDetail() {
               {editVisit
                 ? "Edit Visit"
                 : isRevisit
-                  ? "New Revisit"
+                  ? `Revisit \u2014 ${patient.name}`
                   : "Add Visit"}
             </DialogTitle>
           </DialogHeader>
+
+          {/* Previous visit history for revisit */}
+          {isRevisit && !editVisit && sortedVisits.length > 0 && (
+            <Collapsible open={historyOpen} onOpenChange={setHistoryOpen}>
+              <CollapsibleTrigger asChild>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="w-full justify-between text-sm gap-2 mb-2"
+                  data-ocid="patient_detail.revisit.history.toggle"
+                >
+                  <span className="flex items-center gap-2">
+                    <History className="w-4 h-4" />
+                    Previous Visit History ({sortedVisits.length} visits)
+                  </span>
+                  <ChevronDown
+                    className={`w-4 h-4 transition-transform ${historyOpen ? "rotate-180" : ""}`}
+                  />
+                </Button>
+              </CollapsibleTrigger>
+              <CollapsibleContent>
+                <div className="space-y-2 border rounded-lg p-3 bg-amber-50/50 max-h-72 overflow-y-auto mb-3">
+                  {sortedVisits.map((pv, idx) => (
+                    <div
+                      key={pv.id.toString()}
+                      className={`p-2 rounded border text-xs ${
+                        idx === 0
+                          ? "bg-primary/5 border-primary/20"
+                          : "bg-background border-border"
+                      }`}
+                    >
+                      <div className="flex items-center gap-2 mb-1">
+                        <span className="font-semibold">
+                          {formatDate(pv.visitDate)}
+                        </span>
+                        {pv.visitType && (
+                          <Badge
+                            className={
+                              pv.visitType === "New"
+                                ? "bg-blue-100 text-blue-800 text-xs"
+                                : "bg-green-100 text-green-800 text-xs"
+                            }
+                          >
+                            {pv.visitType}
+                          </Badge>
+                        )}
+                        {idx === 0 && (
+                          <Badge className="bg-amber-100 text-amber-800 text-xs">
+                            Last Visit
+                          </Badge>
+                        )}
+                      </div>
+                      <p>
+                        <span className="font-medium">Complaints:</span>{" "}
+                        {pv.chiefComplaints}
+                      </p>
+                      {pv.diagnosis && (
+                        <p>
+                          <span className="font-medium">Diagnosis:</span>{" "}
+                          {pv.diagnosis}
+                        </p>
+                      )}
+                      {pv.prescriptionItems &&
+                        pv.prescriptionItems.length > 0 && (
+                          <div className="mt-1">
+                            <span className="font-medium">Medicines: </span>
+                            <span className="text-primary">
+                              {pv.prescriptionItems
+                                .map(
+                                  (rx) =>
+                                    `${rx.medicineName} ${rx.potency} (${rx.dosage})`,
+                                )
+                                .join(" | ")}
+                            </span>
+                          </div>
+                        )}
+                      {!pv.prescriptionItems?.length && pv.prescription && (
+                        <p>
+                          <span className="font-medium">\u211e </span>
+                          {pv.prescription}
+                        </p>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </CollapsibleContent>
+            </Collapsible>
+          )}
+
           <div className="space-y-4 py-2">
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-1.5">
@@ -695,7 +909,7 @@ export default function PatientDetail() {
                 />
               </div>
               <div className="col-span-2 space-y-1.5">
-                <Label>Prescription (℞)</Label>
+                <Label>Prescription (\u211e)</Label>
                 <Textarea
                   value={vForm.prescription}
                   onChange={(e) =>

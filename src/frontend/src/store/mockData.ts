@@ -19,7 +19,6 @@ export interface Patient {
   medicalHistory: string;
   isActive: boolean;
   createdAt: bigint;
-  // Extended fields
   dob?: string;
   bloodGroup?: string;
   altPhone?: string;
@@ -54,7 +53,6 @@ export interface Visit {
   medicinePrescribed: string;
   notes: string;
   isActive: boolean;
-  // Extended fields
   visitType?: "New" | "Follow-up" | "Emergency";
   visitTime?: string;
   weight?: string;
@@ -97,7 +95,6 @@ export interface Bill {
   paymentStatus: PaymentStatus;
   notes: string;
   isActive: boolean;
-  // Extended
   paymentMode?: string;
   paymentReference?: string;
   paymentHistory?: PaymentRecord[];
@@ -112,7 +109,6 @@ export interface Medicine {
   minStockLevel: bigint;
   unitPrice: number;
   isActive: boolean;
-  // Extended
   company?: string;
   form?: string;
   hsnCode?: string;
@@ -129,11 +125,13 @@ export interface StockMovement {
   medicineId: bigint;
   date: bigint;
   type: "Add" | "Remove" | "Correction";
+  movementType?: string;
   qtyIn: number;
   qtyOut: number;
   balance: number;
   reference?: string;
   notes?: string;
+  by?: string;
 }
 
 export interface Vendor {
@@ -159,12 +157,16 @@ export interface PurchaseItem {
   batch?: string;
   expiry?: string;
   rate: number;
+  mrp?: number;
+  gstPercent?: number;
+  discountPercent?: number;
   amount: number;
 }
 
 export interface Purchase {
   id: bigint;
   poNumber: string;
+  piNumber?: string;
   vendorId: bigint;
   invoiceNumber: string;
   purchaseDate: bigint;
@@ -174,8 +176,11 @@ export interface Purchase {
   totalAmount: number;
   paidAmount: number;
   status: "paid" | "partial" | "unpaid";
+  invoiceStatus?: "Draft" | "Confirmed" | "Paid" | "Partially Paid";
+  paymentTerms?: number;
+  dueDate?: bigint;
+  billNotes?: string;
   isActive: boolean;
-  // Legacy fields kept for compatibility
   medicineId?: bigint;
   quantity?: number;
   rate?: number;
@@ -744,44 +749,182 @@ const INIT_STOCK_MOVEMENTS: StockMovement[] = [
     medicineId: 1n,
     date: daysAgo(30),
     type: "Add",
+    movementType: "Purchase In",
     qtyIn: 50,
     qtyOut: 0,
     balance: 50,
-    reference: "PO-2026-00001",
+    reference: "PI-2026-00001",
     notes: "Purchase from SBL",
+    by: "Admin",
   },
   {
     id: 2n,
     medicineId: 1n,
-    date: daysAgo(10),
+    date: daysAgo(15),
     type: "Remove",
+    movementType: "Dispensed to Patient",
     qtyIn: 0,
-    qtyOut: 5,
-    balance: 45,
-    reference: "Visit #2",
-    notes: "Dispensed to patient",
+    qtyOut: 3,
+    balance: 47,
+    reference: "INV-2026-00001",
+    notes: "Dispensed to Priya Sharma",
+    by: "Admin",
   },
   {
     id: 3n,
-    medicineId: 3n,
-    date: daysAgo(20),
-    type: "Add",
-    qtyIn: 30,
-    qtyOut: 0,
-    balance: 30,
-    reference: "PO-2026-00002",
-    notes: "Purchase from Medisynth",
+    medicineId: 1n,
+    date: daysAgo(10),
+    type: "Remove",
+    movementType: "Dispensed to Patient",
+    qtyIn: 0,
+    qtyOut: 2,
+    balance: 45,
+    reference: "INV-2026-00002",
+    notes: "Dispensed to Rajesh Kumar",
+    by: "Admin",
   },
   {
     id: 4n,
     medicineId: 3n,
+    date: daysAgo(20),
+    type: "Add",
+    movementType: "Purchase In",
+    qtyIn: 30,
+    qtyOut: 0,
+    balance: 30,
+    reference: "PI-2026-00002",
+    notes: "Purchase from Medisynth",
+    by: "Admin",
+  },
+  {
+    id: 5n,
+    medicineId: 3n,
     date: daysAgo(7),
     type: "Remove",
+    movementType: "Dispensed to Patient",
     qtyIn: 0,
     qtyOut: 22,
     balance: 8,
-    reference: "Visit #1",
+    reference: "INV-2026-00001",
     notes: "Dispensed - low stock now",
+    by: "Admin",
+  },
+  {
+    id: 6n,
+    medicineId: 4n,
+    date: daysAgo(15),
+    type: "Add",
+    movementType: "Purchase In",
+    qtyIn: 60,
+    qtyOut: 0,
+    balance: 60,
+    reference: "PI-2026-00003",
+    notes: "Purchase from SBL",
+    by: "Admin",
+  },
+  {
+    id: 7n,
+    medicineId: 4n,
+    date: daysAgo(5),
+    type: "Remove",
+    movementType: "Dispensed to Patient",
+    qtyIn: 0,
+    qtyOut: 3,
+    balance: 57,
+    reference: "INV-2026-00004",
+    notes: "Dispensed to Mohan Das",
+    by: "Admin",
+  },
+  {
+    id: 8n,
+    medicineId: 4n,
+    date: daysAgo(2),
+    type: "Remove",
+    movementType: "Dispensed to Patient",
+    qtyIn: 0,
+    qtyOut: 2,
+    balance: 55,
+    reference: "INV-2026-00002",
+    notes: "Dispensed",
+    by: "Admin",
+  },
+  {
+    id: 9n,
+    medicineId: 5n,
+    date: daysAgo(25),
+    type: "Add",
+    movementType: "Purchase In",
+    qtyIn: 30,
+    qtyOut: 0,
+    balance: 30,
+    reference: "PI-2026-00001",
+    notes: "Initial stock",
+    by: "Admin",
+  },
+  {
+    id: 10n,
+    medicineId: 5n,
+    date: daysAgo(10),
+    type: "Remove",
+    movementType: "Dispensed to Patient",
+    qtyIn: 0,
+    qtyOut: 10,
+    balance: 20,
+    reference: "INV-2026-00003",
+    notes: "Dispensed",
+    by: "Admin",
+  },
+  {
+    id: 11n,
+    medicineId: 5n,
+    date: daysAgo(5),
+    type: "Remove",
+    movementType: "Dispensed to Patient",
+    qtyIn: 0,
+    qtyOut: 8,
+    balance: 12,
+    reference: "INV-2026-00003",
+    notes: "Dispensed to Ananya",
+    by: "Admin",
+  },
+  {
+    id: 12n,
+    medicineId: 8n,
+    date: daysAgo(20),
+    type: "Add",
+    movementType: "Purchase In",
+    qtyIn: 20,
+    qtyOut: 0,
+    balance: 20,
+    reference: "PI-2026-00002",
+    notes: "Stock purchased",
+    by: "Admin",
+  },
+  {
+    id: 13n,
+    medicineId: 8n,
+    date: daysAgo(8),
+    type: "Remove",
+    movementType: "Dispensed to Patient",
+    qtyIn: 0,
+    qtyOut: 10,
+    balance: 10,
+    reference: "INV-2026-00003",
+    notes: "Dispensed",
+    by: "Admin",
+  },
+  {
+    id: 14n,
+    medicineId: 8n,
+    date: daysAgo(3),
+    type: "Remove",
+    movementType: "Dispensed to Patient",
+    qtyIn: 0,
+    qtyOut: 5,
+    balance: 5,
+    reference: "INV-2026-00003",
+    notes: "Low stock",
+    by: "Admin",
   },
 ];
 
@@ -867,11 +1010,11 @@ const INIT_BILLS: Bill[] = [
     ],
     subtotal: 690,
     gstAmount: 13.5,
-    totalAmount: 783.5,
+    totalAmount: 703.5,
     paidAmount: 500,
     paymentStatus: "partial",
     paymentMode: "Cash",
-    notes: "Balance ₹283.50 pending",
+    notes: "Balance ₹203.50 pending",
     paymentHistory: [
       { date: daysAgo(9), amount: 500, mode: "Cash", notes: "Advance payment" },
     ],
@@ -990,7 +1133,7 @@ const INIT_BILLS: Bill[] = [
     ],
     subtotal: 690,
     gstAmount: 9.95,
-    totalAmount: 699.5,
+    totalAmount: 699.95,
     paidAmount: 0,
     paymentStatus: "pending",
     notes: "",
@@ -1041,9 +1184,13 @@ const INIT_PURCHASES: Purchase[] = [
   {
     id: 1n,
     poNumber: "PO-2026-00001",
+    piNumber: "PI-2026-00001",
     vendorId: 1n,
     invoiceNumber: "HPI-2026-001",
     purchaseDate: daysAgo(30),
+    invoiceStatus: "Paid",
+    paymentTerms: 30,
+    dueDate: daysAgo(0),
     items: [
       {
         medicineId: 1n,
@@ -1053,6 +1200,9 @@ const INIT_PURCHASES: Purchase[] = [
         batch: "SBL2026001",
         expiry: "2027-06-30",
         rate: 65,
+        mrp: 85,
+        gstPercent: 5,
+        discountPercent: 0,
         amount: 3250,
       },
     ],
@@ -1061,14 +1211,19 @@ const INIT_PURCHASES: Purchase[] = [
     totalAmount: 3412.5,
     paidAmount: 3412.5,
     status: "paid",
+    billNotes: "Quality stock received. All 50 bottles checked.",
     isActive: true,
   },
   {
     id: 2n,
     poNumber: "PO-2026-00002",
+    piNumber: "PI-2026-00002",
     vendorId: 2n,
     invoiceNumber: "MS-2026-045",
     purchaseDate: daysAgo(20),
+    invoiceStatus: "Partially Paid",
+    paymentTerms: 30,
+    dueDate: daysFromNow(10),
     items: [
       {
         medicineId: 3n,
@@ -1078,6 +1233,9 @@ const INIT_PURCHASES: Purchase[] = [
         batch: "MED2026015",
         expiry: "2026-12-31",
         rate: 72,
+        mrp: 95,
+        gstPercent: 5,
+        discountPercent: 0,
         amount: 2160,
       },
     ],
@@ -1086,14 +1244,19 @@ const INIT_PURCHASES: Purchase[] = [
     totalAmount: 2268,
     paidAmount: 2000,
     status: "partial",
+    billNotes: "Partial payment made. Balance ₹268 due.",
     isActive: true,
   },
   {
     id: 3n,
     poNumber: "PO-2026-00003",
+    piNumber: "PI-2026-00003",
     vendorId: 3n,
     invoiceNumber: "SBL-2026-112",
     purchaseDate: daysAgo(15),
+    invoiceStatus: "Paid",
+    paymentTerms: 15,
+    dueDate: daysAgo(0),
     items: [
       {
         medicineId: 4n,
@@ -1103,6 +1266,9 @@ const INIT_PURCHASES: Purchase[] = [
         batch: "SBL2026010",
         expiry: "2027-03-31",
         rate: 58,
+        mrp: 75,
+        gstPercent: 5,
+        discountPercent: 0,
         amount: 3480,
       },
     ],
@@ -1111,14 +1277,19 @@ const INIT_PURCHASES: Purchase[] = [
     totalAmount: 3654,
     paidAmount: 3654,
     status: "paid",
+    billNotes: "",
     isActive: true,
   },
   {
     id: 4n,
     poNumber: "PO-2026-00004",
+    piNumber: "PI-2026-00004",
     vendorId: 1n,
     invoiceNumber: "HPI-2026-002",
     purchaseDate: daysAgo(8),
+    invoiceStatus: "Confirmed",
+    paymentTerms: 45,
+    dueDate: daysFromNow(37),
     items: [
       {
         medicineId: 6n,
@@ -1128,14 +1299,18 @@ const INIT_PURCHASES: Purchase[] = [
         batch: "HPI2026009",
         expiry: "2027-03-31",
         rate: 82,
-        amount: 3280,
+        mrp: 105,
+        gstPercent: 5,
+        discountPercent: 5,
+        amount: 3124,
       },
     ],
-    subtotal: 3280,
-    gstAmount: 164,
-    totalAmount: 3444,
+    subtotal: 3124,
+    gstAmount: 156.2,
+    totalAmount: 3280.2,
     paidAmount: 0,
     status: "unpaid",
+    billNotes: "Awaiting payment approval.",
     isActive: true,
   },
 ];
@@ -1284,8 +1459,6 @@ const INIT_CATEGORIES: MedicineCategory[] = [
   { id: 6n, name: "Other", description: "Miscellaneous homeopathic products" },
 ];
 
-// ─── WhatsApp Types ───────────────────────────────────────────────────────────
-
 export interface WhatsAppTemplate {
   id: string;
   name: string;
@@ -1350,7 +1523,6 @@ interface MockDataState {
   medicineCategories: MedicineCategory[];
   stockMovements: StockMovement[];
 
-  // Counters
   nextPatientId: bigint;
   nextVisitId: bigint;
   nextBillId: bigint;
@@ -1363,67 +1535,55 @@ interface MockDataState {
   nextCategoryId: bigint;
   nextBillNumber: number;
   nextPoNumber: number;
+  nextPiNumber: number;
   nextStockMovementId: bigint;
 
-  // Patients CRUD
   addPatient: (
     p: Omit<Patient, "id" | "patientCode" | "isActive" | "createdAt">,
   ) => bigint;
   updatePatient: (id: bigint, p: Partial<Patient>) => void;
   deletePatient: (id: bigint) => void;
 
-  // Visits CRUD
   addVisit: (v: Omit<Visit, "id" | "isActive">) => bigint;
   updateVisit: (id: bigint, v: Partial<Visit>) => void;
   deleteVisit: (id: bigint) => void;
 
-  // Bills CRUD
   addBill: (b: Omit<Bill, "id" | "billNumber" | "isActive">) => bigint;
   updateBill: (id: bigint, b: Partial<Bill>) => void;
   deleteBill: (id: bigint) => void;
   addBillPayment: (billId: bigint, payment: Omit<PaymentRecord, never>) => void;
 
-  // Medicines CRUD
   addMedicine: (m: Omit<Medicine, "id" | "isActive">) => bigint;
   updateMedicine: (id: bigint, m: Partial<Medicine>) => void;
   deleteMedicine: (id: bigint) => void;
   adjustStock: (id: bigint, delta: number) => void;
 
-  // Stock Movements
   addStockMovement: (m: Omit<StockMovement, "id">) => bigint;
 
-  // Vendors CRUD
   addVendor: (v: Omit<Vendor, "id" | "isActive">) => bigint;
   updateVendor: (id: bigint, v: Partial<Vendor>) => void;
   deleteVendor: (id: bigint) => void;
 
-  // Purchases CRUD
   addPurchase: (p: Omit<Purchase, "id" | "isActive">) => bigint;
   updatePurchase: (id: bigint, p: Partial<Purchase>) => void;
   deletePurchase: (id: bigint) => void;
 
-  // Vendor Payments
   addVendorPayment: (p: Omit<VendorPayment, "id">) => bigint;
 
-  // Expenses CRUD
   addExpense: (e: Omit<Expense, "id">) => bigint;
   updateExpense: (id: bigint, e: Partial<Expense>) => void;
   deleteExpense: (id: bigint) => void;
 
-  // Clinic Settings
   updateClinicSettings: (s: Partial<ClinicSettings>) => void;
 
-  // Users CRUD
   addUser: (u: Omit<User, "id">) => bigint;
   updateUser: (id: bigint, u: Partial<User>) => void;
   deleteUser: (id: bigint) => void;
 
-  // Medicine Categories CRUD
   addMedicineCategory: (c: Omit<MedicineCategory, "id">) => bigint;
   updateMedicineCategory: (id: bigint, c: Partial<MedicineCategory>) => void;
   deleteMedicineCategory: (id: bigint) => void;
 
-  // WhatsApp
   whatsappTemplates: WhatsAppTemplate[];
   whatsappLogs: WhatsAppLog[];
   nextWaLogId: number;
@@ -1462,7 +1622,8 @@ export const useMockStore = create<MockDataState>()((set, get) => ({
   nextCategoryId: 7n,
   nextBillNumber: 6,
   nextPoNumber: 5,
-  nextStockMovementId: 5n,
+  nextPiNumber: 5,
+  nextStockMovementId: 15n,
 
   addPatient: (p) => {
     const id = get().nextPatientId;
@@ -1590,13 +1751,21 @@ export const useMockStore = create<MockDataState>()((set, get) => ({
   addPurchase: (p) => {
     const id = get().nextPurchaseId;
     const num = get().nextPoNumber;
+    const piNum = get().nextPiNumber;
     const poNumber =
       p.poNumber ||
       `PO-${new Date().getFullYear()}-${String(num).padStart(5, "0")}`;
+    const piNumber =
+      p.piNumber ||
+      `PI-${new Date().getFullYear()}-${String(piNum).padStart(5, "0")}`;
     set((s) => ({
-      purchases: [...s.purchases, { ...p, id, poNumber, isActive: true }],
+      purchases: [
+        ...s.purchases,
+        { ...p, id, poNumber, piNumber, isActive: true },
+      ],
       nextPurchaseId: id + 1n,
       nextPoNumber: num + 1,
+      nextPiNumber: piNum + 1,
     }));
     return id;
   },
@@ -1664,6 +1833,7 @@ export const useMockStore = create<MockDataState>()((set, get) => ({
     set((s) => ({
       medicineCategories: s.medicineCategories.filter((x) => x.id !== id),
     })),
+
   addTemplate: (t) => {
     const id = `wt-${Date.now()}`;
     set((s) => ({ whatsappTemplates: [...s.whatsappTemplates, { ...t, id }] }));

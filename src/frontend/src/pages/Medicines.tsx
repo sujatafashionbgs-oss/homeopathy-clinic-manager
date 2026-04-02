@@ -82,6 +82,8 @@ export default function Medicines() {
   const [adjustDate, setAdjustDate] = useState(
     new Date().toISOString().split("T")[0],
   );
+  const [adjustMovementType, setAdjustMovementType] = useState("Purchase In");
+  const [adjustRef, setAdjustRef] = useState("");
   const [lowStockOnly, setLowStockOnly] = useState(false);
   const [filterCategory, setFilterCategory] = useState("all");
   const [filterPotency, setFilterPotency] = useState("all");
@@ -188,6 +190,19 @@ export default function Medicines() {
     }
   };
 
+  const MOVEMENT_TYPE_TO_ADJUST: Record<
+    string,
+    "Add" | "Remove" | "Correction"
+  > = {
+    "Purchase In": "Add",
+    Sale: "Remove",
+    "Dispensed to Patient": "Remove",
+    Damaged: "Remove",
+    Expired: "Remove",
+    "Return to Vendor": "Remove",
+    "Manual Adjustment": "Correction",
+  };
+
   const handleAdjust = async () => {
     if (!adjustMed || !adjustQty) return;
     const qty = Number.parseInt(adjustQty, 10);
@@ -195,28 +210,33 @@ export default function Medicines() {
       toast.error("Enter a valid quantity");
       return;
     }
-    const delta =
-      adjustType === "Add" ? qty : adjustType === "Remove" ? -qty : 0;
-    const newBalance = Number(adjustMed.quantity) + delta;
+    const baseType = MOVEMENT_TYPE_TO_ADJUST[adjustMovementType] ?? adjustType;
+    let delta = baseType === "Add" ? qty : baseType === "Remove" ? -qty : 0;
+    let newBalance = Number(adjustMed.quantity) + delta;
+    if (baseType === "Correction") {
+      const current = Number(adjustMed.quantity);
+      delta = qty - current;
+      newBalance = qty;
+    }
     adjustStock(adjustMed.id, delta);
     await addStockMovement.mutateAsync({
       medicineId: adjustMed.id,
       date: nowNanoseconds(),
-      type: adjustType,
-      qtyIn: adjustType === "Add" ? qty : adjustType === "Correction" ? qty : 0,
-      qtyOut: adjustType === "Remove" ? qty : 0,
-      balance: adjustType === "Correction" ? qty : newBalance,
+      type: baseType,
+      movementType: adjustMovementType,
+      qtyIn: baseType === "Add" ? qty : 0,
+      qtyOut: baseType === "Remove" ? qty : 0,
+      balance: Math.max(0, newBalance),
+      reference: adjustRef || undefined,
       notes: adjustNote || undefined,
+      by: "Admin",
     });
-    if (adjustType === "Correction") {
-      // Set absolute value
-      const current = Number(adjustMed.quantity);
-      adjustStock(adjustMed.id, qty - current);
-    }
-    toast.success(`Stock adjusted: ${adjustType}`);
+    toast.success(`Stock adjusted: ${adjustMovementType}`);
     setAdjustMed(null);
     setAdjustQty("");
     setAdjustNote("");
+    setAdjustRef("");
+    setAdjustMovementType("Purchase In");
   };
 
   return (
@@ -409,6 +429,8 @@ export default function Medicines() {
                                 setAdjustQty("");
                                 setAdjustType("Add");
                                 setAdjustNote("");
+                                setAdjustRef("");
+                                setAdjustMovementType("Purchase In");
                               }}
                               data-ocid={`medicines.adjust_button.${i + 1}`}
                             >
@@ -686,31 +708,35 @@ export default function Medicines() {
                   {adjustMed.stockUnit}
                 </p>
               </div>
-              <div className="flex gap-2">
-                {(["Add", "Remove", "Correction"] as const).map((t) => (
-                  <Button
-                    key={t}
-                    size="sm"
-                    variant={adjustType === t ? "default" : "outline"}
-                    className={
-                      adjustType === t
-                        ? "bg-primary text-primary-foreground"
-                        : ""
-                    }
-                    onClick={() => setAdjustType(t)}
-                  >
-                    {t === "Add" ? (
-                      <Plus className="w-3.5 h-3.5 mr-1" />
-                    ) : t === "Remove" ? (
-                      <Minus className="w-3.5 h-3.5 mr-1" />
-                    ) : null}
-                    {t}
-                  </Button>
-                ))}
-              </div>
               <div className="grid grid-cols-2 gap-3">
+                <div className="col-span-2 space-y-1.5">
+                  <Label>Movement Type *</Label>
+                  <Select
+                    value={adjustMovementType}
+                    onValueChange={setAdjustMovementType}
+                  >
+                    <SelectTrigger data-ocid="medicines.adjust.type.select">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {[
+                        "Purchase In",
+                        "Sale",
+                        "Dispensed to Patient",
+                        "Damaged",
+                        "Expired",
+                        "Return to Vendor",
+                        "Manual Adjustment",
+                      ].map((t) => (
+                        <SelectItem key={t} value={t}>
+                          {t}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
                 <div className="space-y-1.5">
-                  <Label>Quantity</Label>
+                  <Label>Quantity *</Label>
                   <Input
                     type="number"
                     min="1"
@@ -727,12 +753,22 @@ export default function Medicines() {
                     onChange={(e) => setAdjustDate(e.target.value)}
                   />
                 </div>
-                <div className="col-span-2 space-y-1.5">
-                  <Label>Reason / Notes</Label>
+                <div className="space-y-1.5">
+                  <Label>Reference (Bill/PO No.)</Label>
+                  <Input
+                    value={adjustRef}
+                    onChange={(e) => setAdjustRef(e.target.value)}
+                    placeholder="PI-2026-00001"
+                    data-ocid="medicines.adjust.ref.input"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label>Notes</Label>
                   <Input
                     value={adjustNote}
                     onChange={(e) => setAdjustNote(e.target.value)}
-                    placeholder="Purchase, dispensed, etc."
+                    placeholder="Additional notes..."
+                    data-ocid="medicines.adjust.notes.input"
                   />
                 </div>
               </div>
@@ -772,7 +808,7 @@ export default function Medicines() {
                                       : "bg-blue-100 text-blue-800 text-xs"
                                 }
                               >
-                                {mv.type}
+                                {mv.movementType ?? mv.type}
                               </Badge>
                             </td>
                             <td className="px-3 py-1.5 text-right text-green-700">
